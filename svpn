@@ -1,0 +1,73 @@
+#!/bin/bash
+
+# MODIFY THESE LINES ACCORDING TO YOUR SERVER CREDENTIALS
+SSH_SERVER= # you SSH server address
+SSH_PORT= # your SSH server port (use 22 if you don't know)
+SSH_KEY= # PATH to you ssh credentials. Delete it if not needed
+# REMOVE THIS LINE AFTER THAT
+echo "You need to modify the script to add your SSH server credentials before running it. Remove this line afterwards" && exit
+
+P1=10.8.0.1
+P2=10.8.0.2
+
+DEFAULT_GATEWAY=$(ip route | awk '$1=="default" {print $3}')
+
+function start_vpn() {
+    echo
+    echo "Attempting to start your VPN!!!!!!!!!"
+    echo
+
+    # create the tunnel using pvpn
+    if [ ! -z "${SSH_PORT}" ]
+    then
+        export SSH_ARGS="-p $SSH_PORT"
+    fi
+
+    if [ ! -z "${SSH_KEY}" ]
+    then
+        export SSH_ARGS="$SSH_ARGS -i $SSH_KEY"
+    fi
+
+    OUT=$(pvpn -i "${P1}":"${P2}" -t ssh-3 root@"${SSH_SERVER}" "${P2}")
+    CONNECTED=$?
+    if [ "$CONNECTED" == 0 ]
+    then
+        export IFACE=$(echo $OUT | sed 's/.* \(tun[1-9]\+\) connected$/\1/g')
+    else
+        exit
+    fi
+
+    # add an explicit route to the SSH server to keep it alive
+    ip route add "${SSH_SERVER}" via "${DEFAULT_GATEWAY}" metric 100
+    ip route add default via "${P2}" metric 200
+}
+
+function stop_vpn() {
+    echo
+    echo "Attempting to stop your VPN!!!!!!!!!!"
+    echo
+
+    if [ ! -z "${IFACE}" ]
+    then
+        # stop the tunnels!
+        pvpn -S "${IFACE}"
+        ip route del "${SSH_SERVER}"
+    else
+        echo "Ooops, something went wrong! FUCK YOU, says Linus"
+    fi
+}
+
+echo
+echo "Looks like this is your default gateway atm:"
+echo
+echo -e $DEFAULT_GATEWAY
+echo 
+read  -n 1 -p "If this looks good to you, hit Enter to proceed or ^C to exit:"
+echo
+echo "Awesome, let's go!"
+
+start_vpn
+
+trap stop_vpn INT
+echo "Looks like it didn't crash."
+sleep infinity
